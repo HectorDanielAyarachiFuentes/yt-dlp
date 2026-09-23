@@ -56,20 +56,21 @@
     <!-- Cuerpo de 3 Columnas -->
     <div class="studio-workspace">
       <!-- 1. LEFT PANEL (Sidebar) -->
-      <aside class="panel-sidebar">
+      <aside class="panel-sidebar" id="panelSidebar">
         <div class="panel-head">
           <span class="head-title">LEFT PANEL</span>
-          <button class="btn-collapse" title="Colapsar panel">&laquo;</button>
+          <button class="btn-collapse" id="btnCollapseLeft" title="Replegar panel izquierdo">&laquo;</button>
         </div>
 
         <div class="sidebar-section">
-          <div class="section-title">
+          <div class="section-title collapsible-title" id="btnToggleBiblioteca" title="Replegar / Desplegar Biblioteca">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
             </svg>
             <span>BIBLIOTECA</span>
+            <span class="btn-collapse tree-chevron" id="treeChevron" title="Replegar carpetas">&#9662;</span>
           </div>
-          <ul class="tree-list">
+          <ul class="tree-list" id="treeBiblioteca">
             <li class="tree-item" data-filter="mp3">
               <span class="tree-line"></span>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -122,10 +123,15 @@
       </aside>
 
       <!-- 2. CENTER PANEL (Cola de Descargas) -->
-      <section class="panel-center">
+      <section class="panel-center" id="panelCenter">
         <div class="panel-head">
-          <span class="head-title">COLA DE DESCARGAS</span>
-          <button class="btn-collapse" title="Opciones">&laquo;</button>
+          <div class="panel-head-left">
+            <button class="btn-collapse btn-toggle-left hidden" id="btnExpandLeft" title="Desplegar panel izquierdo (Biblioteca)">&raquo;</button>
+            <span class="head-title">COLA DE DESCARGAS</span>
+          </div>
+          <div class="panel-head-right">
+            <button class="btn-collapse" id="btnCollapseRightFromCenter" title="Replegar / Desplegar panel derecho">&laquo;</button>
+          </div>
         </div>
 
         <!-- Input Bar estilo omnibox -->
@@ -196,10 +202,10 @@
       </section>
 
       <!-- 3. RIGHT PANEL (Inspector / Player Deck) -->
-      <aside class="panel-right">
+      <aside class="panel-right" id="panelRight">
         <div class="panel-head">
           <span class="head-title">RIGHT PANEL</span>
-          <button class="btn-collapse" title="Opciones">&#8964;</button>
+          <button class="btn-collapse" id="btnCollapseRight" title="Replegar panel derecho">&raquo;</button>
         </div>
 
         <!-- Pantalla / Visualizador de Audio o Carátula -->

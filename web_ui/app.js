@@ -433,6 +433,101 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 3500);
   }
 
+  // 12. Colapso y Despliegue de Paneles (Flechas Interactivas)
+  const studioWorkspace = document.querySelector(".studio-workspace");
+  const btnCollapseLeft = document.getElementById("btnCollapseLeft");
+  const btnExpandLeft = document.getElementById("btnExpandLeft");
+  const btnCollapseRightFromCenter = document.getElementById("btnCollapseRightFromCenter");
+  const btnCollapseRight = document.getElementById("btnCollapseRight");
+  const btnToggleBiblioteca = document.getElementById("btnToggleBiblioteca");
+  const treeBiblioteca = document.getElementById("treeBiblioteca");
+  const treeChevron = document.getElementById("treeChevron");
+
+  let isLeftCollapsed = localStorage.getItem("studio_left_collapsed") === "true";
+  let isRightCollapsed = localStorage.getItem("studio_right_collapsed") === "true";
+  let isTreeCollapsed = localStorage.getItem("studio_tree_collapsed") === "true";
+
+  function applyLeftCollapse(collapsed) {
+    isLeftCollapsed = collapsed;
+    localStorage.setItem("studio_left_collapsed", String(collapsed));
+    if (collapsed) {
+      studioWorkspace.classList.add("left-collapsed");
+      btnExpandLeft.classList.remove("hidden");
+    } else {
+      studioWorkspace.classList.remove("left-collapsed");
+      btnExpandLeft.classList.add("hidden");
+    }
+  }
+
+  function applyRightCollapse(collapsed) {
+    isRightCollapsed = collapsed;
+    localStorage.setItem("studio_right_collapsed", String(collapsed));
+    if (collapsed) {
+      studioWorkspace.classList.add("right-collapsed");
+      if (btnCollapseRightFromCenter) {
+        btnCollapseRightFromCenter.classList.add("active-highlight");
+        btnCollapseRightFromCenter.setAttribute("title", "Desplegar panel derecho (Inspector)");
+        btnCollapseRightFromCenter.innerHTML = "&raquo;";
+      }
+    } else {
+      studioWorkspace.classList.remove("right-collapsed");
+      if (btnCollapseRightFromCenter) {
+        btnCollapseRightFromCenter.classList.remove("active-highlight");
+        btnCollapseRightFromCenter.setAttribute("title", "Replegar panel derecho");
+        btnCollapseRightFromCenter.innerHTML = "&laquo;";
+      }
+    }
+  }
+
+  function applyTreeCollapse(collapsed) {
+    isTreeCollapsed = collapsed;
+    localStorage.setItem("studio_tree_collapsed", String(collapsed));
+    if (collapsed) {
+      treeBiblioteca?.classList.add("tree-collapsed");
+      treeChevron?.classList.add("collapsed");
+    } else {
+      treeBiblioteca?.classList.remove("tree-collapsed");
+      treeChevron?.classList.remove("collapsed");
+    }
+  }
+
+  // Restaurar estados guardados
+  if (isLeftCollapsed) applyLeftCollapse(true);
+  if (isRightCollapsed) applyRightCollapse(true);
+  if (isTreeCollapsed) applyTreeCollapse(true);
+
+  // Listeners de flechas y cabeceras
+  btnCollapseLeft?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    applyLeftCollapse(true);
+    showToast("Panel izquierdo replegado", "info");
+  });
+
+  btnExpandLeft?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    applyLeftCollapse(false);
+    showToast("Panel izquierdo desplegado", "info");
+  });
+
+  btnCollapseRightFromCenter?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const nextState = !isRightCollapsed;
+    applyRightCollapse(nextState);
+    showToast(nextState ? "Panel derecho replegado" : "Panel derecho desplegado", "info");
+  });
+
+  btnCollapseRight?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    applyRightCollapse(true);
+    showToast("Panel derecho replegado", "info");
+  });
+
+  btnToggleBiblioteca?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const nextState = !isTreeCollapsed;
+    applyTreeCollapse(nextState);
+  });
+
   // Inicio
   checkServerStatus();
   loadHistory();
