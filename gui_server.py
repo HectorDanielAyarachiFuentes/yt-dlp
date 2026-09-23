@@ -12,6 +12,7 @@ import time
 import webbrowser
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
+import shutil
 
 # Agregar directorio actual al sys.path para importar yt_dlp directamente
 ROOT_DIR = Path(__file__).resolve().parent
@@ -107,12 +108,57 @@ def sanitize_url(url):
 DEFAULT_DOWNLOAD_DIR = Path.home() / "Downloads" / "yt-dlp"
 DEFAULT_DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+def format_bytes(bytes_num):
+    if not bytes_num:
+        return "0 B"
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        if bytes_num < 1024.0:
+            return f"{bytes_num:.1f} {unit}"
+        bytes_num /= 1024.0
+    return f"{bytes_num:.1f} PB"
+
+def format_eta(seconds):
+    if not seconds or seconds < 0:
+        return "--:--"
+    m, s = divmod(int(seconds), 60)
+    h, m = divmod(m, 60)
+    if h > 0:
+        return f"{h:02d}:{m:02d}:{s:02d}"
+    return f"{m:02d}:{s:02d}"
+
 # Estado global de descargas
 class DownloadManager:
     def __init__(self):
         self.lock = threading.Lock()
         self.downloads = {}  # id -> dict con info y progreso
         self.current_download_id = None
+        self._load_existing_files()
+
+    def _load_existing_files(self):
+        try:
+            if DEFAULT_DOWNLOAD_DIR.exists():
+                files = sorted(DEFAULT_DOWNLOAD_DIR.iterdir(), key=lambda p: p.stat().st_mtime)
+                for f in files:
+                    if f.is_file() and f.suffix.lower() in ('.mp3', '.mp4', '.m4a', '.webm', '.mkv'):
+                        dl_id = f"disk_{abs(hash(str(f)))}"
+                        stat = f.stat()
+                        is_audio = f.suffix.lower() in ('.mp3', '.m4a')
+                        self.downloads[dl_id] = {
+                            "id": dl_id,
+                            "title": f.stem,
+                            "filename": f.name,
+                            "format_type": "audio" if is_audio else "video",
+                            "status": "finished",
+                            "percent": 100.0,
+                            "downloaded_str": format_bytes(stat.st_size),
+                            "total_str": format_bytes(stat.st_size),
+                            "speed": "Guardado en disco",
+                            "eta": "00:00",
+                            "output_path": str(f.resolve()),
+                            "completed_at": stat.st_mtime
+                        }
+        except Exception:
+            pass
 
     def create_download(self, url, options):
         with self.lock:
@@ -156,27 +202,9 @@ class DownloadManager:
 
     def get_history(self):
         with self.lock:
-            return list(self.downloads.values())[-10:]
+            return list(self.downloads.values())[-20:]
 
 manager = DownloadManager()
-
-def format_bytes(bytes_num):
-    if not bytes_num:
-        return "0 B"
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-        if bytes_num < 1024.0:
-            return f"{bytes_num:.1f} {unit}"
-        bytes_num /= 1024.0
-    return f"{bytes_num:.1f} PB"
-
-def format_eta(seconds):
-    if not seconds or seconds < 0:
-        return "--:--"
-    m, s = divmod(int(seconds), 60)
-    h, m = divmod(m, 60)
-    if h > 0:
-        return f"{h:02d}:{m:02d}:{s:02d}"
-    return f"{m:02d}:{s:02d}"
 
 def run_download_thread(dl_id, url, format_type, quality, output_dir):
     try:
@@ -423,6 +451,65 @@ class WebUIHandler(SimpleHTTPRequestHandler):
         if path == "/api/history":
             history = manager.get_history()
             self.send_json({"history": history})
+            return
+
+        if path == "/api/stream":
+            query = params
+            file_path = query.get("path", [""])[0]
+            if not file_path or not os.path.exists(file_path):
+                filename = query.get("file", [""])[0]
+                if filename:
+                    candidate = DEFAULT_DOWNLOAD_DIR / filename
+                    if candidate.exists():
+                        file_path = str(candidate)
+
+            if not file_path or not os.path.exists(file_path):
+                self.send_error(404, "Archivo no encontrado")
+                return
+
+            ext = os.path.splitext(file_path)[1].lower()
+            mime_type = "audio/mpeg" if ext == ".mp3" else ("video/mp4" if ext == ".mp4" else "application/octet-stream")
+
+            try:
+                stat = os.stat(file_path)
+                file_size = stat.st_size
+                range_header = self.headers.get('Range')
+
+                if range_header and range_header.startswith("bytes="):
+                    byte_range = range_header[6:]
+                    parts = byte_range.split("-")
+                    start = int(parts[0]) if parts[0] else 0
+                    end = int(parts[1]) if len(parts) > 1 and parts[1] else file_size - 1
+                    end = min(end, file_size - 1)
+                    length = end - start + 1
+
+                    self.send_response(206)
+                    self.send_header("Content-Type", mime_type)
+                    self.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
+                    self.send_header("Content-Length", str(length))
+                    self.send_header("Accept-Ranges", "bytes")
+                    self.end_headers()
+
+                    with open(file_path, "rb") as f:
+                        f.seek(start)
+                        remaining = length
+                        while remaining > 0:
+                            chunk_size = min(64 * 1024, remaining)
+                            chunk = f.read(chunk_size)
+                            if not chunk:
+                                break
+                            self.wfile.write(chunk)
+                            remaining -= len(chunk)
+                else:
+                    self.send_response(200)
+                    self.send_header("Content-Type", mime_type)
+                    self.send_header("Content-Length", str(file_size))
+                    self.send_header("Accept-Ranges", "bytes")
+                    self.end_headers()
+                    with open(file_path, "rb") as f:
+                        shutil.copyfileobj(f, self.wfile)
+            except Exception:
+                pass
             return
 
         # Archivos estáticos normales

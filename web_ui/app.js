@@ -337,6 +337,113 @@ document.addEventListener("DOMContentLoaded", () => {
     return t;
   }
 
+  let activeAudioElement = null;
+  let activeVideoElement = null;
+
+  function stopAllPreviews() {
+    if (activeAudioElement) {
+      activeAudioElement.pause();
+      activeAudioElement = null;
+    }
+    if (activeVideoElement) {
+      activeVideoElement.pause();
+      activeVideoElement = null;
+    }
+    const visAudio = document.getElementById("visAudioPlayer");
+    const visVideo = document.getElementById("visVideoPlayer");
+    if (visAudio) { visAudio.pause(); visAudio.currentTime = 0; }
+    if (visVideo) { visVideo.pause(); visVideo.currentTime = 0; }
+    document.querySelectorAll(".card-preview-drawer").forEach(d => d.classList.add("hidden"));
+    document.querySelectorAll(".queue-card").forEach(c => c.classList.remove("selected-card"));
+    document.querySelectorAll(".btn-play-card").forEach(b => {
+      b.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>`;
+    });
+  }
+
+  function selectAndPreviewMedia(item, card, autoPlay = true) {
+    const isAudio = item.format_type === "audio" || (item.filename && item.filename.endsWith(".mp3"));
+    const streamUrl = `/api/stream?path=${encodeURIComponent(item.output_path || '')}&file=${encodeURIComponent(item.filename || '')}`;
+    const displayTitle = cleanTitle(item.title || item.filename);
+
+    const wasSelected = card.classList.contains("selected-card");
+    const drawer = card.querySelector(".card-preview-drawer");
+    const playBtn = card.querySelector(".btn-play-card");
+    const inlineMedia = isAudio ? drawer.querySelector("audio") : drawer.querySelector("video");
+
+    if (wasSelected && inlineMedia && !inlineMedia.paused) {
+      inlineMedia.pause();
+      playBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>`;
+      return;
+    }
+
+    stopAllPreviews();
+
+    card.classList.add("selected-card");
+    drawer.classList.remove("hidden");
+
+    // Lado izquierdo: Reproductor inline en la tarjeta seleccionada
+    if (inlineMedia) {
+      if (isAudio) activeAudioElement = inlineMedia;
+      else activeVideoElement = inlineMedia;
+
+      if (autoPlay) {
+        inlineMedia.play().catch(() => {});
+        playBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>`;
+      }
+
+      inlineMedia.onplay = () => {
+        playBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>`;
+      };
+      inlineMedia.onpause = () => {
+        playBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>`;
+      };
+    }
+
+    // Lado derecho: Sincronizar Right Panel (Inspector)
+    lcdTitle.textContent = displayTitle;
+    lcdChannel.textContent = "ARCHIVO LOCAL // PREVIEW";
+    lcdViews.textContent = item.downloaded_str || (isAudio ? "MP3 AUDIO" : "MP4 VIDEO");
+    lcdFmt.textContent = isAudio ? "MP3 // AUDIO ACTIVO" : "MP4 // VIDEO ACTIVO";
+
+    const visPlaceholder = document.getElementById("visPlaceholder");
+    const visThumbWrap = document.getElementById("visThumbWrap");
+    const visAudioWrap = document.getElementById("visAudioWrap");
+    const visVideoWrap = document.getElementById("visVideoWrap");
+    const visAudioPlayer = document.getElementById("visAudioPlayer");
+    const visVideoPlayer = document.getElementById("visVideoPlayer");
+
+    if (isAudio) {
+      visPlaceholder.classList.remove("hidden");
+      visAudioWrap.classList.remove("hidden");
+      visThumbWrap.classList.add("hidden");
+      visVideoWrap.classList.add("hidden");
+      if (visAudioPlayer) {
+        visAudioPlayer.src = streamUrl;
+      }
+    } else {
+      visPlaceholder.classList.add("hidden");
+      visAudioWrap.classList.add("hidden");
+      visThumbWrap.classList.add("hidden");
+      visVideoWrap.classList.remove("hidden");
+      if (visVideoPlayer) {
+        visVideoPlayer.src = streamUrl;
+      }
+    }
+  }
+
+  // 8. Cargar y renderizar historial
+  async function loadHistory() {
+    try {
+      const res = await fetch("/api/history");
+      if (!res.ok) return;
+      const data = await res.json();
+      historyItems = data.history || [];
+      renderQueueList();
+    } catch (e) {
+      console.warn("History fetch error:", e);
+    }
+  }
+
   function renderQueueList() {
     const finishedItems = historyItems.filter(item => item.status === "finished");
     
@@ -350,7 +457,7 @@ document.addEventListener("DOMContentLoaded", () => {
     historyItemsContainer.innerHTML = "";
 
     filtered.slice().reverse().forEach(item => {
-      const isAudio = item.format_type === "audio";
+      const isAudio = item.format_type === "audio" || (item.filename && item.filename.endsWith(".mp3"));
       const card = document.createElement("div");
       card.className = "queue-card";
       const displayTitle = cleanTitle(item.title || item.filename);
@@ -366,7 +473,7 @@ document.addEventListener("DOMContentLoaded", () => {
             </div>
           </div>
           <div class="card-controls">
-            <button class="btn-icon-ctl btn-open-media" title="Reproducir archivo">
+            <button class="btn-icon-ctl btn-play-card" title="Previsualizar / Reproducir">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                 <polygon points="5 3 19 12 5 21 5 3"></polygon>
               </svg>
@@ -378,13 +485,32 @@ document.addEventListener("DOMContentLoaded", () => {
             </button>
           </div>
         </div>
+        <div class="card-preview-drawer hidden">
+          <div class="inline-player-row ${isAudio ? '' : 'video'}">
+            <span class="preview-tag">${isAudio ? 'AUDIO LOCAL' : 'VIDEO LOCAL'}</span>
+            ${isAudio ? `
+              <audio controls class="inline-audio" preload="metadata" src="/api/stream?path=${encodeURIComponent(item.output_path || '')}&file=${encodeURIComponent(item.filename || '')}"></audio>
+            ` : `
+              <video controls playsinline class="inline-video" preload="metadata" src="/api/stream?path=${encodeURIComponent(item.output_path || '')}&file=${encodeURIComponent(item.filename || '')}"></video>
+            `}
+          </div>
+        </div>
       `;
 
-      card.querySelector(".btn-open-media").addEventListener("click", () => {
-        openPath(item.output_path);
+      card.addEventListener("click", (e) => {
+        if (e.target.closest(".btn-open-dir") || e.target.closest("audio") || e.target.closest("video")) {
+          return;
+        }
+        selectAndPreviewMedia(item, card, true);
       });
 
-      card.querySelector(".btn-open-dir").addEventListener("click", () => {
+      card.querySelector(".btn-play-card").addEventListener("click", (e) => {
+        e.stopPropagation();
+        selectAndPreviewMedia(item, card, true);
+      });
+
+      card.querySelector(".btn-open-dir").addEventListener("click", (e) => {
+        e.stopPropagation();
         openPath(item.output_path);
       });
 
