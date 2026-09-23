@@ -283,6 +283,10 @@ def run_download_thread(dl_id, url, format_type, quality, output_dir):
                 'no_warnings': True,
                 'nocheckcertificate': True,
                 'noplaylist': True,
+                'extractor_args': {'youtube': {
+                    'player_client': ['tv_embedded', 'android', 'ios', 'web'],
+                    'player_skip': ['webpage'],
+                }},
             }
 
         cookie_path = get_cookie_file()
@@ -331,14 +335,16 @@ def run_download_thread(dl_id, url, format_type, quality, output_dir):
                         f'bestvideo[height<={quality}][vcodec^=avc1]+bestaudio[acodec^=mp4a]/'
                         f'bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/'
                         f'bestvideo[height<={quality}]+bestaudio/'
-                        f'best[height<={quality}][ext=mp4]/best'
+                        f'mp4[height<={quality}]/'
+                        f'best[height<={quality}][ext=mp4]/'
+                        f'best[height<={quality}]/best'
                     )
                 else:
                     fmt = (
                         'bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/'
                         'bestvideo[ext=mp4]+bestaudio[ext=m4a]/'
                         'bestvideo+bestaudio/'
-                        'best[ext=mp4]/best'
+                        'mp4/best[ext=mp4]/best'
                     )
 
                 ydl_opts.update({
@@ -423,45 +429,66 @@ class WebUIHandler(SimpleHTTPRequestHandler):
                 self.send_json(bbb_data)
                 return
 
-            try:
-                ydl_opts = {
-                    'extract_flat': False,
-                    'skip_download': True,
+            def try_extract(extra_opts=None):
+                opts = {
                     'quiet': True,
                     'no_warnings': True,
                     'noplaylist': True,
                     'socket_timeout': 15,
                 }
+                if extra_opts:
+                    opts.update(extra_opts)
                 cookie_path = get_cookie_file()
                 if cookie_path:
-                    ydl_opts['cookiefile'] = cookie_path
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    
-                    # Extraer resoluciones de video disponibles
-                    formats = info.get("formats", [])
-                    resolutions = set()
-                    for f in formats:
-                        h = f.get("height")
-                        if h and isinstance(h, int) and h >= 240:
-                            resolutions.add(h)
-                    sorted_resolutions = sorted(list(resolutions), reverse=True)
+                    opts['cookiefile'] = cookie_path
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    # process=False: obtiene metadatos sin validar/seleccionar formatos
+                    return ydl.extract_info(url, download=False, process=False)
 
-                    data = {
-                        "id": info.get("id"),
-                        "title": info.get("title", "Sin título"),
-                        "uploader": info.get("uploader") or info.get("channel") or "Desconocido",
-                        "duration": info.get("duration", 0),
-                        "duration_string": info.get("duration_string") or format_eta(info.get("duration", 0)),
-                        "thumbnail": info.get("thumbnail", ""),
-                        "view_count": info.get("view_count", 0),
-                        "description": (info.get("description") or "")[:200],
-                        "available_resolutions": sorted_resolutions,
-                        "is_playlist": False
-                    }
-                    self.send_json(data)
-            except Exception as e:
-                self.send_json({"error": str(e)}, status=500)
+            info = None
+            last_error = None
+            try:
+                # Intento 1: cliente web estándar con cookies
+                info = try_extract()
+            except Exception as e1:
+                last_error = e1
+                err1 = str(e1).lower()
+                if any(k in err1 for k in ('bot', 'reload', 'sign in', 'format', 'not available')):
+                    try:
+                        # Intento 2: cliente iOS/Android
+                        info = try_extract({
+                            'extractor_args': {'youtube': {'player_client': ['ios', 'android']}}
+                        })
+                        last_error = None
+                    except Exception as e2:
+                        last_error = e2
+
+            if last_error is not None:
+                self.send_json({"error": str(last_error)}, status=500)
+                return
+
+            # Extraer resoluciones de video disponibles
+            formats = info.get("formats", [])
+            resolutions = set()
+            for f in formats:
+                h = f.get("height")
+                if h and isinstance(h, int) and h >= 240:
+                    resolutions.add(h)
+            sorted_resolutions = sorted(list(resolutions), reverse=True)
+
+            data = {
+                "id": info.get("id"),
+                "title": info.get("title", "Sin título"),
+                "uploader": info.get("uploader") or info.get("channel") or "Desconocido",
+                "duration": info.get("duration", 0),
+                "duration_string": info.get("duration_string") or format_eta(info.get("duration", 0)),
+                "thumbnail": info.get("thumbnail", ""),
+                "view_count": info.get("view_count", 0),
+                "description": (info.get("description") or "")[:200],
+                "available_resolutions": sorted_resolutions,
+                "is_playlist": False
+            }
+            self.send_json(data)
             return
 
         if path == "/api/progress":
