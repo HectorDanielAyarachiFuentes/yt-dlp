@@ -25,13 +25,70 @@ except ImportError:
 
 # Detectar ffmpeg mediante imageio_ffmpeg o PATH del sistema
 FFMPEG_EXE = None
+FFMPEG_DIR = None
 try:
     import imageio_ffmpeg
     ffmpeg_candidate = imageio_ffmpeg.get_ffmpeg_exe()
     if os.path.exists(ffmpeg_candidate):
         FFMPEG_EXE = ffmpeg_candidate
+        FFMPEG_DIR = os.path.dirname(ffmpeg_candidate)
+        alias_exe = os.path.join(FFMPEG_DIR, "ffmpeg.exe")
+        if not os.path.exists(alias_exe):
+            import shutil
+            shutil.copyfile(ffmpeg_candidate, alias_exe)
 except Exception:
     pass
+
+import re
+import xml.etree.ElementTree as ET
+
+def parse_bbb_url(url):
+    """
+    Detecta URLs de plataformas educativas BigBlueButton (BBB), habituales en UNCOMA, Moodle, etc.
+    Extrae metadatos oficiales y enlaces directos de video/audio.
+    """
+    clean_url = url.split("?")[0].rstrip("/")
+    match = re.search(r'https?://([^/]+)/playback/presentation/2\.[0-9]+/([a-zA-Z0-9_-]+)', clean_url)
+    if not match:
+        return None
+    domain, rec_id = match.group(1), match.group(2)
+    meta_url = f'https://{domain}/presentation/{rec_id}/metadata.xml'
+
+    try:
+        req = urllib.request.Request(meta_url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            tree = ET.fromstring(r.read())
+            meeting_name = tree.findtext('.//meetingName') or tree.findtext('.//bbb-recording-name') or 'Clase Grabada'
+            context = tree.findtext('.//bbb-context') or tree.findtext('.//bbb-context-name') or ''
+            duration_ms = int(tree.findtext('.//duration') or 0)
+            duration_sec = duration_ms // 1000
+            thumb = tree.findtext('.//images/image') or ''
+
+            title = meeting_name
+            if context and context not in meeting_name:
+                title = f"{meeting_name} • {context}"
+
+            webcams_url = f'https://{domain}/presentation/{rec_id}/video/webcams.webm'
+            deskshare_url = f'https://{domain}/presentation/{rec_id}/deskshare/deskshare.webm'
+
+            return {
+                "id": rec_id,
+                "title": title,
+                "uploader": f"Aula Virtual ({domain})",
+                "duration": duration_sec,
+                "duration_string": format_eta(duration_sec),
+                "thumbnail": thumb,
+                "view_count": int(tree.findtext('.//participants') or 0),
+                "description": f"Grabación educativa de BigBlueButton en {domain}. Participantes registrados: {tree.findtext('.//participants') or 'N/A'}",
+                "available_resolutions": [720, 480],
+                "is_playlist": False,
+                "is_bbb": True,
+                "webcams_url": webcams_url,
+                "deskshare_url": deskshare_url,
+                "stream_url": webcams_url
+            }
+    except Exception as e:
+        return None
 
 # Carpeta de descargas predeterminada (Descargas del usuario en Windows)
 DEFAULT_DOWNLOAD_DIR = Path.home() / "Downloads" / "yt-dlp"
@@ -149,16 +206,33 @@ def run_download_thread(dl_id, url, format_type, quality, output_dir):
                     "percent": 99.0
                 })
 
-        ydl_opts = {
-            'outtmpl': os.path.join(output_dir, '%(title)s [%(id)s].%(ext)s'),
-            'progress_hooks': [progress_hook],
-            'postprocessor_hooks': [postprocessor_hook],
-            'quiet': True,
-            'no_warnings': True,
-            'nocheckcertificate': True,
-        }
+        bbb_data = parse_bbb_url(url)
+        clean_title = None
+        if bbb_data:
+            actual_url = bbb_data["webcams_url"]
+            clean_title = re.sub(r'[\\/*?:"<>|]', "", bbb_data["title"])
+            ydl_opts = {
+                'outtmpl': os.path.join(output_dir, f"{clean_title}.%(ext)s"),
+                'progress_hooks': [progress_hook],
+                'postprocessor_hooks': [postprocessor_hook],
+                'quiet': True,
+                'no_warnings': True,
+                'nocheckcertificate': True,
+            }
+        else:
+            actual_url = url
+            ydl_opts = {
+                'outtmpl': os.path.join(output_dir, '%(title)s [%(id)s].%(ext)s'),
+                'progress_hooks': [progress_hook],
+                'postprocessor_hooks': [postprocessor_hook],
+                'quiet': True,
+                'no_warnings': True,
+                'nocheckcertificate': True,
+            }
 
-        if FFMPEG_EXE:
+        if FFMPEG_DIR:
+            ydl_opts['ffmpeg_location'] = FFMPEG_DIR
+        elif FFMPEG_EXE:
             ydl_opts['ffmpeg_location'] = FFMPEG_EXE
 
         if format_type == 'audio':
@@ -178,6 +252,10 @@ def run_download_thread(dl_id, url, format_type, quality, output_dir):
             # Video: Seleccionar formato según resolución deseada
             if quality == '2160':
                 fmt = 'bestvideo[height<=2160]+bestaudio/best[height<=2160]/best'
+            if bbb_data:
+                fmt = 'best'
+            elif quality == '2160':
+                fmt = 'bestvideo[height<=2160]+bestaudio/best[height<=2160]/best'
             elif quality == '1440':
                 fmt = 'bestvideo[height<=1440]+bestaudio/best[height<=1440]/best'
             elif quality == '1080':
@@ -195,7 +273,7 @@ def run_download_thread(dl_id, url, format_type, quality, output_dir):
             })
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
+            info = ydl.extract_info(actual_url, download=True)
             filename = ydl.prepare_filename(info)
             if format_type == 'audio':
                 filename = os.path.splitext(filename)[0] + '.mp3'
@@ -246,6 +324,12 @@ class WebUIHandler(SimpleHTTPRequestHandler):
             url = params.get("url", [""])[0].strip()
             if not url:
                 self.send_json({"error": "Parámetro 'url' requerido"}, status=400)
+                return
+
+            # Soporte nativo para BigBlueButton (UNCOMA, Moodle, aulas virtuales)
+            bbb_data = parse_bbb_url(url)
+            if bbb_data:
+                self.send_json(bbb_data)
                 return
 
             try:
@@ -320,9 +404,13 @@ class WebUIHandler(SimpleHTTPRequestHandler):
             quality = payload.get("quality", "best")  # 'best', '1080', '720', etc.
             output_dir = payload.get("output_dir", str(DEFAULT_DOWNLOAD_DIR))
 
+            bbb_data = parse_bbb_url(url)
+            title = bbb_data["title"] if bbb_data else payload.get("title", url)
+            thumbnail = bbb_data["thumbnail"] if bbb_data else payload.get("thumbnail", "")
+
             dl_id = manager.create_download(url, {
-                "title": payload.get("title", url),
-                "thumbnail": payload.get("thumbnail", ""),
+                "title": title,
+                "thumbnail": thumbnail,
                 "format_type": format_type,
                 "quality": quality
             })
