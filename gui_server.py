@@ -37,6 +37,8 @@ try:
         if not os.path.exists(alias_exe):
             import shutil
             shutil.copyfile(ffmpeg_candidate, alias_exe)
+        if FFMPEG_DIR not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = FFMPEG_DIR + os.pathsep + os.environ.get("PATH", "")
 except Exception:
     pass
 
@@ -283,10 +285,8 @@ def run_download_thread(dl_id, url, format_type, quality, output_dir):
                 'no_warnings': True,
                 'nocheckcertificate': True,
                 'noplaylist': True,
-                'extractor_args': {'youtube': {
-                    'player_client': ['tv_embedded', 'android', 'ios', 'web'],
-                    'player_skip': ['webpage'],
-                }},
+                'js_runtimes': {'node': {}},
+                'remote_components': ['ejs:github'],
             }
 
         cookie_path = get_cookie_file()
@@ -332,20 +332,10 @@ def run_download_thread(dl_id, url, format_type, quality, output_dir):
             else:
                 if quality in ('2160', '1440', '1080', '720', '480'):
                     fmt = (
-                        f'bestvideo[height<={quality}][vcodec^=avc1]+bestaudio[acodec^=mp4a]/'
-                        f'bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/'
-                        f'bestvideo[height<={quality}]+bestaudio/'
-                        f'mp4[height<={quality}]/'
-                        f'best[height<={quality}][ext=mp4]/'
-                        f'best[height<={quality}]/best'
+                        f'bestvideo*[height<={quality}]+bestaudio/best[height<={quality}]/best'
                     )
                 else:
-                    fmt = (
-                        'bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/'
-                        'bestvideo[ext=mp4]+bestaudio[ext=m4a]/'
-                        'bestvideo+bestaudio/'
-                        'mp4/best[ext=mp4]/best'
-                    )
+                    fmt = 'bestvideo*+bestaudio/best'
 
                 ydl_opts.update({
                     'format': fmt,
@@ -435,6 +425,8 @@ class WebUIHandler(SimpleHTTPRequestHandler):
                     'no_warnings': True,
                     'noplaylist': True,
                     'socket_timeout': 15,
+                    'js_runtimes': {'node': {}},
+                    'remote_components': ['ejs:github'],
                 }
                 if extra_opts:
                     opts.update(extra_opts)
