@@ -90,6 +90,19 @@ def parse_bbb_url(url):
     except Exception as e:
         return None
 
+def sanitize_url(url):
+    """
+    Si es un video individual con parametros de lista/radio (watch?v=...&list=RD...),
+    remueve el parametro &list para descargar unicamente el video solicitado.
+    """
+    if "youtube.com/watch" in url or "youtu.be/" in url:
+        parsed = urllib.parse.urlparse(url)
+        qs = urllib.parse.parse_qs(parsed.query)
+        if "v" in qs:
+            clean_query = urllib.parse.urlencode({"v": qs["v"][0]})
+            return urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path, '', clean_query, ''))
+    return url
+
 # Carpeta de descargas predeterminada (Descargas del usuario en Windows)
 DEFAULT_DOWNLOAD_DIR = Path.home() / "Downloads" / "yt-dlp"
 DEFAULT_DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -206,6 +219,7 @@ def run_download_thread(dl_id, url, format_type, quality, output_dir):
                     "percent": 99.0
                 })
 
+        url = sanitize_url(url)
         bbb_data = parse_bbb_url(url)
         clean_title = None
         if bbb_data:
@@ -218,6 +232,7 @@ def run_download_thread(dl_id, url, format_type, quality, output_dir):
                 'quiet': True,
                 'no_warnings': True,
                 'nocheckcertificate': True,
+                'noplaylist': True,
             }
         else:
             actual_url = url
@@ -228,6 +243,7 @@ def run_download_thread(dl_id, url, format_type, quality, output_dir):
                 'quiet': True,
                 'no_warnings': True,
                 'nocheckcertificate': True,
+                'noplaylist': True,
             }
 
         if FFMPEG_DIR:
@@ -249,28 +265,36 @@ def run_download_thread(dl_id, url, format_type, quality, output_dir):
                 }]
             })
         else:
-            # Video: Seleccionar formato según resolución deseada
-            if quality == '2160':
-                fmt = 'bestvideo[height<=2160]+bestaudio/best[height<=2160]/best'
+            # Video: Seleccionar formato H.264 (avc1) + AAC (mp4a) para compatibilidad universal con Windows Media Player, Smart TVs y moviles
             if bbb_data:
                 fmt = 'best'
-            elif quality == '2160':
-                fmt = 'bestvideo[height<=2160]+bestaudio/best[height<=2160]/best'
-            elif quality == '1440':
-                fmt = 'bestvideo[height<=1440]+bestaudio/best[height<=1440]/best'
-            elif quality == '1080':
-                fmt = 'bestvideo[height<=1080]+bestaudio/best[height<=1080]/best'
-            elif quality == '720':
-                fmt = 'bestvideo[height<=720]+bestaudio/best[height<=720]/best'
-            elif quality == '480':
-                fmt = 'bestvideo[height<=480]+bestaudio/best[height<=480]/best'
+                ydl_opts.update({
+                    'format': fmt,
+                    'postprocessors': [{
+                        'key': 'FFmpegVideoConvertor',
+                        'preferedformat': 'mp4',
+                    }]
+                })
             else:
-                fmt = 'bestvideo+bestaudio/best'
+                if quality in ('2160', '1440', '1080', '720', '480'):
+                    fmt = (
+                        f'bestvideo[height<={quality}][vcodec^=avc1]+bestaudio[acodec^=mp4a]/'
+                        f'bestvideo[height<={quality}][ext=mp4]+bestaudio[ext=m4a]/'
+                        f'bestvideo[height<={quality}]+bestaudio/'
+                        f'best[height<={quality}][ext=mp4]/best'
+                    )
+                else:
+                    fmt = (
+                        'bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/'
+                        'bestvideo[ext=mp4]+bestaudio[ext=m4a]/'
+                        'bestvideo+bestaudio/'
+                        'best[ext=mp4]/best'
+                    )
 
-            ydl_opts.update({
-                'format': fmt,
-                'merge_output_format': 'mp4',
-            })
+                ydl_opts.update({
+                    'format': fmt,
+                    'merge_output_format': 'mp4',
+                })
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(actual_url, download=True)
@@ -305,7 +329,17 @@ class WebUIHandler(SimpleHTTPRequestHandler):
         path = parsed.path
         params = urllib.parse.parse_qs(parsed.query)
 
-        if path == "/favicon.ico":
+        if path in ("/favicon.ico", "/favicon.svg"):
+            fav_path = os.path.join(str(ROOT_DIR), "web_ui", "favicon.svg")
+            if os.path.exists(fav_path):
+                with open(fav_path, "rb") as f:
+                    content = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/svg+xml")
+                self.send_header("Content-Length", str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+                return
             self.send_response(204)
             self.end_headers()
             return
@@ -325,6 +359,7 @@ class WebUIHandler(SimpleHTTPRequestHandler):
             if not url:
                 self.send_json({"error": "Parámetro 'url' requerido"}, status=400)
                 return
+            url = sanitize_url(url)
 
             # Soporte nativo para BigBlueButton (UNCOMA, Moodle, aulas virtuales)
             bbb_data = parse_bbb_url(url)
@@ -363,7 +398,7 @@ class WebUIHandler(SimpleHTTPRequestHandler):
                         "view_count": info.get("view_count", 0),
                         "description": (info.get("description") or "")[:200],
                         "available_resolutions": sorted_resolutions,
-                        "is_playlist": info.get("_type") == "playlist" or "entries" in info
+                        "is_playlist": False
                     }
                     self.send_json(data)
             except Exception as e:
@@ -399,6 +434,7 @@ class WebUIHandler(SimpleHTTPRequestHandler):
             if not url:
                 self.send_json({"error": "La URL es requerida"}, status=400)
                 return
+            url = sanitize_url(url)
 
             format_type = payload.get("format_type", "video")  # 'video' o 'audio'
             quality = payload.get("quality", "best")  # 'best', '1080', '720', etc.
