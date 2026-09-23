@@ -206,6 +206,17 @@ class DownloadManager:
 
 manager = DownloadManager()
 
+def get_cookie_file():
+    candidates = [
+        ROOT_DIR / "cookies.txt",
+        DEFAULT_DOWNLOAD_DIR / "cookies.txt",
+        Path.home() / "Downloads" / "cookies.txt"
+    ]
+    for c in candidates:
+        if c.exists():
+            return str(c.resolve())
+    return None
+
 def run_download_thread(dl_id, url, format_type, quality, output_dir):
     try:
         def progress_hook(d):
@@ -273,6 +284,10 @@ def run_download_thread(dl_id, url, format_type, quality, output_dir):
                 'nocheckcertificate': True,
                 'noplaylist': True,
             }
+
+        cookie_path = get_cookie_file()
+        if cookie_path:
+            ydl_opts['cookiefile'] = cookie_path
 
         if FFMPEG_DIR:
             ydl_opts['ffmpeg_location'] = FFMPEG_DIR
@@ -383,12 +398,15 @@ class WebUIHandler(SimpleHTTPRequestHandler):
             return
 
         if path == "/api/status":
+            cookie_path = get_cookie_file()
             self.send_json({
                 "status": "ok",
                 "version": yt_dlp.version.__version__,
                 "ffmpeg_available": FFMPEG_EXE is not None,
                 "ffmpeg_path": FFMPEG_EXE or "No encontrado",
-                "download_dir": str(DEFAULT_DOWNLOAD_DIR)
+                "download_dir": str(DEFAULT_DOWNLOAD_DIR),
+                "cookies_loaded": cookie_path is not None,
+                "cookie_file": os.path.basename(cookie_path) if cookie_path else None
             })
             return
 
@@ -414,6 +432,9 @@ class WebUIHandler(SimpleHTTPRequestHandler):
                     'noplaylist': True,
                     'socket_timeout': 15,
                 }
+                cookie_path = get_cookie_file()
+                if cookie_path:
+                    ydl_opts['cookiefile'] = cookie_path
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
                     
@@ -572,6 +593,35 @@ class WebUIHandler(SimpleHTTPRequestHandler):
                 self.send_json({"status": "opened"})
             except Exception as e:
                 self.send_json({"error": str(e)}, status=500)
+            return
+
+        if path == "/api/upload-cookies":
+            cookie_text = payload.get("cookies", "").strip()
+            if not cookie_text:
+                self.send_json({"error": "El archivo de cookies está vacío"}, status=400)
+                return
+
+            target = ROOT_DIR / "cookies.txt"
+            try:
+                with open(target, "w", encoding="utf-8") as f:
+                    f.write(cookie_text)
+                self.send_json({
+                    "status": "ok", 
+                    "message": "Cookies guardadas correctamente",
+                    "cookie_file": "cookies.txt"
+                })
+            except Exception as e:
+                self.send_json({"error": str(e)}, status=500)
+            return
+
+        if path == "/api/clear-cookies":
+            target = ROOT_DIR / "cookies.txt"
+            if target.exists():
+                try:
+                    target.unlink()
+                except Exception:
+                    pass
+            self.send_json({"status": "ok", "message": "Cookies eliminadas"})
             return
 
         self.send_json({"error": "Ruta no encontrada"}, status=404)

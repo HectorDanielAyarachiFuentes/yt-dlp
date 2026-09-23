@@ -132,7 +132,12 @@ document.addEventListener("DOMContentLoaded", () => {
       showToast("Señal cargada en el Right Panel", "success");
       systemLedLabel.textContent = "SYNCED";
     } catch (err) {
-      showToast(err.message, "error");
+      if (err.message.includes("Sign in to confirm you're not a bot") || err.message.includes("bot")) {
+        showToast("YouTube requiere cookies de autenticación (Anti-Bot)", "error");
+        openSettingsModal();
+      } else {
+        showToast(err.message, "error");
+      }
       systemLedLabel.textContent = "READY // IDLE";
     } finally {
       setLoadingState(false);
@@ -308,7 +313,13 @@ document.addEventListener("DOMContentLoaded", () => {
           downloadBtnText.textContent = "REINTENTAR";
           systemLedDot.className = "led-dot";
           systemLedLabel.textContent = "ERROR";
-          showToast(`Error: ${data.error_message || 'Desconocido'}`, "error");
+          const errMsg = data.error_message || 'Desconocido';
+          if (errMsg.includes("Sign in to confirm you're not a bot") || errMsg.includes("bot")) {
+            showToast("YouTube requiere cookies de autenticación (Anti-Bot)", "error");
+            openSettingsModal();
+          } else {
+            showToast(`Error: ${errMsg}`, "error");
+          }
           activeQueueItem.classList.add("hidden");
         }
       } catch (err) {
@@ -652,6 +663,88 @@ document.addEventListener("DOMContentLoaded", () => {
     e.stopPropagation();
     const nextState = !isTreeCollapsed;
     applyTreeCollapse(nextState);
+  });
+
+  // 13. Modal de Ajustes / Cookies Anti-Bot
+  const settingsModal = document.getElementById("settingsModal");
+  const btnSettings = document.getElementById("btnSettings");
+  const btnCloseSettings = document.getElementById("btnCloseSettings");
+  const cookieStatusLed = document.getElementById("cookieStatusLed");
+  const cookieStatusText = document.getElementById("cookieStatusText");
+  const btnSelectCookieFile = document.getElementById("btnSelectCookieFile");
+  const cookieFileInput = document.getElementById("cookieFileInput");
+  const btnClearCookies = document.getElementById("btnClearCookies");
+
+  function openSettingsModal() {
+    settingsModal?.classList.remove("hidden");
+    refreshCookieStatus();
+  }
+
+  function closeSettingsModal() {
+    settingsModal?.classList.add("hidden");
+  }
+
+  async function refreshCookieStatus() {
+    try {
+      const res = await fetch("/api/status");
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.cookies_loaded) {
+        cookieStatusLed.className = "cookie-led active";
+        cookieStatusText.textContent = `Estado: Cookies activas (${data.cookie_file || 'cookies.txt'})`;
+        btnClearCookies?.classList.remove("hidden");
+      } else {
+        cookieStatusLed.className = "cookie-led";
+        cookieStatusText.textContent = "Estado: Sin archivo cookies.txt";
+        btnClearCookies?.classList.add("hidden");
+      }
+    } catch (e) {
+      console.warn("Cookie status check failed:", e);
+    }
+  }
+
+  btnSettings?.addEventListener("click", openSettingsModal);
+  btnCloseSettings?.addEventListener("click", closeSettingsModal);
+  settingsModal?.addEventListener("click", (e) => {
+    if (e.target === settingsModal) closeSettingsModal();
+  });
+
+  btnSelectCookieFile?.addEventListener("click", () => {
+    cookieFileInput?.click();
+  });
+
+  cookieFileInput?.addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const res = await fetch("/api/upload-cookies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cookies: text })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === "ok") {
+        showToast("¡Cookies guardadas correctamente! Ahora puedes descargar.", "success");
+        refreshCookieStatus();
+      } else {
+        throw new Error(data.error || "Error al subir cookies");
+      }
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      cookieFileInput.value = "";
+    }
+  });
+
+  btnClearCookies?.addEventListener("click", async () => {
+    try {
+      await fetch("/api/clear-cookies", { method: "POST" });
+      showToast("Cookies eliminadas", "info");
+      refreshCookieStatus();
+    } catch (e) {
+      showToast("Error al eliminar cookies", "error");
+    }
   });
 
   // Inicio
