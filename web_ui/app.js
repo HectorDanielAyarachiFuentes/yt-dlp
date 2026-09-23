@@ -1,103 +1,117 @@
 /**
- * yt-dlp Studio - Frontend Logic
+ * YT-DLP STUDIO DECK // PRO-2026
+ * Controlador de Interfaz de 3 Paneles
  */
 
 document.addEventListener("DOMContentLoaded", () => {
   // Elementos DOM
-  const urlForm = document.getElementById("urlForm");
   const videoUrlInput = document.getElementById("videoUrl");
   const btnPaste = document.getElementById("btnPaste");
   const btnAnalyze = document.getElementById("btnAnalyze");
-  const btnLabel = btnAnalyze.querySelector(".btn-label");
-  const btnLoader = btnAnalyze.querySelector(".btn-loader");
-  const btnIcon = btnAnalyze.querySelector(".btn-icon");
+  const btnText = btnAnalyze.querySelector(".btn-text");
+  const spinner = btnAnalyze.querySelector(".spinner");
 
-  const previewCard = document.getElementById("previewCard");
-  const videoThumb = document.getElementById("videoThumb");
-  const videoDuration = document.getElementById("videoDuration");
-  const videoTitle = document.getElementById("videoTitle");
-  const videoAuthor = document.getElementById("videoAuthor");
-  const videoViews = document.getElementById("videoViews");
+  // Panel Derecho (Inspector / Player)
+  const visPlaceholder = document.getElementById("visPlaceholder");
+  const visThumbWrap = document.getElementById("visThumbWrap");
+  const visThumbImg = document.getElementById("visThumbImg");
+  const visDuration = document.getElementById("visDuration");
 
-  const tabButtons = document.querySelectorAll(".tab-btn");
-  const videoQualityOptions = document.getElementById("videoQualityOptions");
-  const audioQualityOptions = document.getElementById("audioQualityOptions");
+  const lcdChannel = document.getElementById("lcdChannel");
+  const lcdViews = document.getElementById("lcdViews");
+  const lcdTitle = document.getElementById("lcdTitle");
+  const lcdFmt = document.getElementById("lcdFmt");
+
+  const modeButtons = document.querySelectorAll(".mode-btn");
   const qualitySelect = document.getElementById("qualitySelect");
   const audioBitrateSelect = document.getElementById("audioBitrateSelect");
   const btnStartDownload = document.getElementById("btnStartDownload");
   const downloadBtnText = document.getElementById("downloadBtnText");
 
-  const progressCard = document.getElementById("progressCard");
-  const downloadBadge = document.getElementById("downloadBadge");
-  const progressFileName = document.getElementById("progressFileName");
-  const progressPercent = document.getElementById("progressPercent");
-  const progressBar = document.getElementById("progressBar");
-  const metricSpeed = document.getElementById("metricSpeed");
-  const metricDownloaded = document.getElementById("metricDownloaded");
-  const metricEta = document.getElementById("metricEta");
+  // Panel Central (Cola de Descargas)
+  const activeQueueItem = document.getElementById("activeQueueItem");
+  const activeCardBadge = document.getElementById("activeCardBadge");
+  const activeCardTitle = document.getElementById("activeCardTitle");
+  const activeCardSize = document.getElementById("activeCardSize");
+  const activeCardStatus = document.getElementById("activeCardStatus");
+  const activeProgressFill = document.getElementById("activeProgressFill");
+  const historyItemsContainer = document.getElementById("historyItemsContainer");
 
-  const historyList = document.getElementById("historyList");
-  const historyCount = document.getElementById("historyCount");
+  // Barra Superior y Otros
+  const systemLedDot = document.getElementById("systemLedDot");
+  const systemLedLabel = document.getElementById("systemLedLabel");
   const btnOpenDownloads = document.getElementById("btnOpenDownloads");
-  const engineVersion = document.getElementById("engineVersion");
   const toastContainer = document.getElementById("toastContainer");
+  const treeItems = document.querySelectorAll(".tree-item");
 
-  // Estado local
+  // Estado
   let currentVideoInfo = null;
   let activeFormatType = "video"; // 'video' | 'audio'
   let progressPollingInterval = null;
   let isDownloading = false;
   let historyItems = [];
+  let currentFilter = "all";
 
-  // 1. Comprobar estado del motor yt-dlp al cargar
+  // 1. Estado inicial del sistema
   async function checkServerStatus() {
     try {
       const res = await fetch("/api/status");
       if (res.ok) {
-        const data = await res.json();
-        engineVersion.textContent = `yt-dlp v${data.version}`;
-        if (data.ffmpeg_available) {
-          engineVersion.title = `Motor listo. FFmpeg activo en: ${data.ffmpeg_path}`;
-        } else {
-          engineVersion.title = "Motor listo (FFmpeg no encontrado)";
-        }
+        systemLedDot.className = "led-dot blue";
+        systemLedLabel.textContent = "READY // IDLE";
       }
     } catch (e) {
-      engineVersion.textContent = "Servidor desconectado";
-      console.warn("No se pudo conectar al backend:", e);
+      systemLedDot.className = "led-dot";
+      systemLedLabel.textContent = "OFFLINE";
     }
   }
 
-  // 2. Botón Pegar Portapapeles
+  // 2. Pegar portapapeles y auto-análisis
   btnPaste.addEventListener("click", async () => {
     try {
       const text = await navigator.clipboard.readText();
       if (text) {
         videoUrlInput.value = text.trim();
         videoUrlInput.focus();
-        showToast("Enlace pegado desde el portapapeles", "info");
-        // Si parece una URL válida, disparar análisis automáticamente
-        if (text.startsWith("http://") || text.startsWith("https://")) {
-          analyzeUrl(text.trim());
-        }
+        showToast("Enlace pegado", "info");
+        checkAndAnalyze(text.trim());
       }
     } catch (err) {
-      showToast("No se pudo acceder al portapapeles directamente. Pega con Ctrl+V.", "info");
+      showToast("Pega con Ctrl+V directamente", "info");
     }
   });
 
-  // 3. Manejo de formulario de búsqueda
-  urlForm.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const url = videoUrlInput.value.trim();
-    if (url) {
+  videoUrlInput.addEventListener("paste", () => {
+    setTimeout(() => {
+      const val = videoUrlInput.value.trim();
+      if (val) checkAndAnalyze(val);
+    }, 50);
+  });
+
+  btnAnalyze.addEventListener("click", () => {
+    const val = videoUrlInput.value.trim();
+    if (val) analyzeUrl(val);
+  });
+
+  videoUrlInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const val = videoUrlInput.value.trim();
+      if (val) analyzeUrl(val);
+    }
+  });
+
+  function checkAndAnalyze(url) {
+    if (url.startsWith("http://") || url.startsWith("https://")) {
       analyzeUrl(url);
     }
-  });
+  }
 
+  // 3. Extracción de Metadatos
   async function analyzeUrl(url) {
-    setAnalyzeLoading(true);
-    previewCard.classList.add("hidden");
+    setLoadingState(true);
+    systemLedDot.className = "led-dot blue";
+    systemLedLabel.textContent = "TUNING...";
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -110,93 +124,103 @@ document.addEventListener("DOMContentLoaded", () => {
       const data = await res.json();
 
       if (!res.ok || data.error) {
-        throw new Error(data.error || "No se pudo obtener información del video");
+        throw new Error(data.error || "No se pudo leer el stream");
       }
 
       currentVideoInfo = data;
-      renderPreview(data);
-      showToast("¡Información del video cargada con éxito!", "success");
+      renderRightPanel(data);
+      showToast("Señal cargada en el Right Panel", "success");
+      systemLedLabel.textContent = "SYNCED";
     } catch (err) {
-      if (err.name === "AbortError") {
-        showToast("La búsqueda tardó más de lo esperado. Reintenta o comprueba tu conexión.", "error");
-      } else {
-        showToast(`Error: ${err.message}`, "error");
-      }
+      showToast(err.message, "error");
+      systemLedLabel.textContent = "READY // IDLE";
     } finally {
-      setAnalyzeLoading(false);
+      setLoadingState(false);
     }
   }
 
-  function setAnalyzeLoading(loading) {
+  function setLoadingState(loading) {
     if (loading) {
-      btnLabel.textContent = "Buscando...";
-      btnLoader.classList.remove("hidden");
-      btnIcon.classList.add("hidden");
+      btnText.textContent = "...";
+      spinner.classList.remove("hidden");
       btnAnalyze.disabled = true;
     } else {
-      btnLabel.textContent = "Buscar";
-      btnLoader.classList.add("hidden");
-      btnIcon.classList.remove("hidden");
+      btnText.textContent = "CARGAR";
+      spinner.classList.add("hidden");
       btnAnalyze.disabled = false;
     }
   }
 
-  // 4. Renderizar Tarjeta de Previsualización
-  function renderPreview(info) {
-    videoThumb.src = info.thumbnail || "";
-    videoDuration.textContent = info.duration_string || "00:00";
-    videoTitle.textContent = info.title || "Video sin título";
-    videoAuthor.innerHTML = `
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-      ${info.uploader || "Desconocido"}
-    `;
-    
-    const views = info.view_count ? Number(info.view_count).toLocaleString("es-ES") : "0";
-    videoViews.innerHTML = `
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-      ${views} vistas
-    `;
-
-    // Cargar resoluciones detectadas en el selector
-    if (info.available_resolutions && info.available_resolutions.length > 0) {
-      qualitySelect.innerHTML = `<option value="best" selected>✨ Mejor Calidad Disponible</option>`;
-      info.available_resolutions.forEach(res => {
-        const opt = document.createElement("option");
-        opt.value = String(res);
-        opt.textContent = `${res}p ${res >= 1080 ? 'Full HD' : (res >= 720 ? 'HD' : '')}`;
-        qualitySelect.appendChild(opt);
-      });
+  // 4. Renderizar datos en el Right Panel
+  function renderRightPanel(info) {
+    if (info.thumbnail) {
+      visThumbImg.src = info.thumbnail;
+      visPlaceholder.classList.add("hidden");
+      visThumbWrap.classList.remove("hidden");
     }
 
-    previewCard.classList.remove("hidden");
-    previewCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    visDuration.textContent = info.duration_string || "00:00";
+    lcdChannel.textContent = (info.uploader || "DESCONOCIDO").toUpperCase();
+    
+    const views = info.view_count ? Number(info.view_count).toLocaleString("es-ES") : "0";
+    lcdViews.textContent = `${views} VISTAS`;
+    lcdTitle.textContent = info.title || "Video sin título";
+
+    // Opciones de resolución
+    qualitySelect.innerHTML = `<option value="best" selected>★ Mejor Resolución (H.264)</option>`;
+    if (info.available_resolutions && info.available_resolutions.length > 0) {
+      info.available_resolutions.forEach(r => {
+        const opt = document.createElement("option");
+        opt.value = String(r);
+        opt.textContent = `${r}p ${r >= 1080 ? 'Full HD' : (r >= 720 ? 'HD' : '')}`;
+        qualitySelect.appendChild(opt);
+      });
+      lcdFmt.textContent = `H.264 // ${info.available_resolutions[0]}P`;
+    } else {
+      lcdFmt.textContent = `H.264 // MP4`;
+    }
+
+    btnStartDownload.disabled = false;
+    btnStartDownload.classList.remove("disabled");
   }
 
-  // 5. Cambio de pestañas (Video vs Audio)
-  tabButtons.forEach(btn => {
+  // 5. Selector de Modo (Video MP4 vs Audio MP3)
+  modeButtons.forEach(btn => {
     btn.addEventListener("click", () => {
-      tabButtons.forEach(b => b.classList.remove("active"));
+      modeButtons.forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
       activeFormatType = btn.dataset.type;
 
       if (activeFormatType === "video") {
-        videoQualityOptions.classList.remove("hidden");
-        audioQualityOptions.classList.add("hidden");
-        downloadBtnText.textContent = "Descargar Video MP4";
+        qualitySelect.classList.remove("hidden");
+        audioBitrateSelect.classList.add("hidden");
+        lcdFmt.textContent = qualitySelect.value === 'best'
+          ? (currentVideoInfo && currentVideoInfo.available_resolutions ? `H.264 // ${currentVideoInfo.available_resolutions[0]}P` : "H.264 // AUTO")
+          : `H.264 // ${qualitySelect.value}P`;
       } else {
-        videoQualityOptions.classList.add("hidden");
-        audioQualityOptions.classList.remove("hidden");
-        downloadBtnText.textContent = "Descargar Audio MP3";
+        qualitySelect.classList.add("hidden");
+        audioBitrateSelect.classList.remove("hidden");
+        lcdFmt.textContent = `MP3 // ${audioBitrateSelect.value} KBPS`;
       }
     });
   });
 
-  // 6. Iniciar Descarga
+  audioBitrateSelect.addEventListener("change", () => {
+    lcdFmt.textContent = `MP3 // ${audioBitrateSelect.value} KBPS`;
+  });
+
+  qualitySelect.addEventListener("change", () => {
+    lcdFmt.textContent = qualitySelect.value === 'best' 
+      ? 'H.264 // AUTO' 
+      : `H.264 // ${qualitySelect.value}P`;
+  });
+
+  // 6. Iniciar Descarga (Grabar en Disco)
   btnStartDownload.addEventListener("click", async () => {
     if (!currentVideoInfo || isDownloading) return;
 
-    const quality = activeFormatType === "video" 
-      ? qualitySelect.value 
+    const quality = activeFormatType === "video"
+      ? qualitySelect.value
       : audioBitrateSelect.value;
 
     const payload = {
@@ -209,7 +233,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
     try {
       btnStartDownload.disabled = true;
-      downloadBtnText.textContent = "Iniciando descarga...";
+      downloadBtnText.textContent = "GRABANDO...";
+      systemLedDot.className = "led-dot red";
+      systemLedLabel.textContent = "RECORDING";
+
+      // Mostrar tarjeta activa en la cola
+      activeCardBadge.textContent = activeFormatType === "video" ? "MP4" : "MP3";
+      activeCardTitle.textContent = currentVideoInfo.title;
+      activeCardSize.textContent = "Calculando...";
+      activeCardStatus.textContent = "Iniciando descarga...";
+      activeProgressFill.style.width = "0%";
+      activeQueueItem.classList.remove("hidden");
 
       const res = await fetch("/api/download", {
         method: "POST",
@@ -218,25 +252,23 @@ document.addEventListener("DOMContentLoaded", () => {
       });
 
       const data = await res.json();
-      if (!res.ok || data.error) {
-        throw new Error(data.error || "No se pudo iniciar la descarga");
-      }
+      if (!res.ok || data.error) throw new Error(data.error || "Error al iniciar descarga");
 
-      showToast("Descarga iniciada", "info");
+      showToast("Descarga añadida a la cola", "info");
       startProgressPolling();
     } catch (err) {
-      showToast(`Error: ${err.message}`, "error");
+      showToast(err.message, "error");
       btnStartDownload.disabled = false;
-      downloadBtnText.textContent = activeFormatType === "video" ? "Descargar Video MP4" : "Descargar Audio MP3";
+      downloadBtnText.textContent = "GRABAR EN DISCO";
+      systemLedDot.className = "led-dot blue";
+      systemLedLabel.textContent = "READY // IDLE";
+      activeQueueItem.classList.add("hidden");
     }
   });
 
   // 7. Polling de Progreso en Vivo
   function startProgressPolling() {
     isDownloading = true;
-    progressCard.classList.remove("hidden");
-    progressCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
-
     if (progressPollingInterval) clearInterval(progressPollingInterval);
 
     progressPollingInterval = setInterval(async () => {
@@ -245,170 +277,163 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!res.ok) return;
         const data = await res.json();
 
-        updateProgressUI(data);
+        const percent = Math.min(Math.max(data.percent || 0, 0), 100);
+        activeProgressFill.style.width = `${percent}%`;
 
-        if (data.status === "finished") {
+        if (data.status === "downloading") {
+          activeCardSize.textContent = data.downloaded_str || "0 MB";
+          activeCardStatus.textContent = `Descargando ${percent.toFixed(0)}% @ ${data.speed || '0 MB/s'}`;
+        } else if (data.status === "processing") {
+          if (data.downloaded_str || data.total_str) {
+            activeCardSize.textContent = data.total_str || data.downloaded_str;
+          }
+          const isAudio = activeFormatType === "audio" || (data.filename && data.filename.endsWith(".mp3"));
+          activeCardStatus.textContent = isAudio 
+            ? "Convirtiendo audio a MP3 (Multi-core)..." 
+            : "Empaquetando video MP4...";
+        } else if (data.status === "finished") {
           clearInterval(progressPollingInterval);
           isDownloading = false;
           btnStartDownload.disabled = false;
-          downloadBtnText.textContent = activeFormatType === "video" ? "Descargar Video MP4" : "Descargar Audio MP3";
-          showToast(`¡Descarga completada! ${data.filename || ''}`, "success");
+          downloadBtnText.textContent = "GRABAR EN DISCO";
+          systemLedDot.className = "led-dot blue";
+          systemLedLabel.textContent = "READY // IDLE";
+          activeQueueItem.classList.add("hidden");
+          showToast("¡Descarga completada y guardada en disco!", "success");
           loadHistory();
         } else if (data.status === "error") {
           clearInterval(progressPollingInterval);
           isDownloading = false;
           btnStartDownload.disabled = false;
-          downloadBtnText.textContent = "Reintentar Descarga";
-          showToast(`Error en la descarga: ${data.error_message || 'Desconocido'}`, "error");
-          downloadBadge.textContent = "Error";
-          downloadBadge.style.color = "var(--accent-rose)";
+          downloadBtnText.textContent = "REINTENTAR";
+          systemLedDot.className = "led-dot";
+          systemLedLabel.textContent = "ERROR";
+          showToast(`Error: ${data.error_message || 'Desconocido'}`, "error");
+          activeQueueItem.classList.add("hidden");
         }
       } catch (err) {
-        console.warn("Error en sondeo de progreso:", err);
+        console.warn("Progress poll error:", err);
       }
     }, 400);
   }
 
-  function updateProgressUI(data) {
-    const percent = Math.min(Math.max(data.percent || 0, 0), 100);
-    progressBar.style.width = `${percent}%`;
-    progressPercent.textContent = `${percent.toFixed(0)}%`;
-
-    if (data.filename) {
-      progressFileName.textContent = data.filename;
-    } else if (currentVideoInfo) {
-      progressFileName.textContent = currentVideoInfo.title;
-    }
-
-    if (data.status === "downloading") {
-      downloadBadge.textContent = "Descargando";
-      downloadBadge.style.color = "var(--accent-cyan)";
-      metricSpeed.textContent = data.speed || "Calculando...";
-      metricDownloaded.textContent = `${data.downloaded_str || '0 MB'} / ${data.total_str || '0 MB'}`;
-      metricEta.textContent = data.eta || "--:--";
-    } else if (data.status === "processing") {
-      downloadBadge.textContent = "Procesando FFmpeg";
-      downloadBadge.style.color = "var(--accent-purple)";
-      metricSpeed.textContent = data.speed || "Extrayendo/Uniendo pistas...";
-      metricEta.textContent = "Un momento...";
-    } else if (data.status === "finished") {
-      downloadBadge.textContent = "Completado ✓";
-      downloadBadge.style.color = "var(--accent-emerald)";
-      metricSpeed.textContent = "Finalizado";
-      metricEta.textContent = "00:00";
-    }
-  }
-
-  // 8. Cargar y renderizar historial de descargas
+  // 8. Cargar y renderizar historial
   async function loadHistory() {
     try {
       const res = await fetch("/api/history");
       if (!res.ok) return;
       const data = await res.json();
       historyItems = data.history || [];
-      renderHistory();
+      renderQueueList();
     } catch (e) {
-      console.warn("No se pudo cargar historial:", e);
+      console.warn("History fetch error:", e);
     }
   }
 
-  function renderHistory() {
+  function cleanTitle(raw) {
+    if (!raw) return "Sin título";
+    let t = raw.replace(/\.[a-zA-Z0-9]{3,4}$/, '');
+    t = t.replace(/\s*\[[a-zA-Z0-9_-]{8,15}\]$/, '');
+    return t;
+  }
+
+  function renderQueueList() {
     const finishedItems = historyItems.filter(item => item.status === "finished");
-    historyCount.textContent = `${finishedItems.length} archivo${finishedItems.length === 1 ? '' : 's'}`;
+    
+    // Filtrar según selección de biblioteca
+    const filtered = finishedItems.filter(item => {
+      if (currentFilter === "mp3") return item.format_type === "audio";
+      if (currentFilter === "mp4") return item.format_type === "video";
+      return true;
+    });
 
-    if (finishedItems.length === 0) {
-      historyList.innerHTML = `
-        <div class="history-empty">
-          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="7 10 12 15 17 10"></polyline>
-            <line x1="12" y1="15" x2="12" y2="3"></line>
-          </svg>
-          <p>Tus descargas completadas aparecerán aquí.</p>
-        </div>
-      `;
-      return;
-    }
+    historyItemsContainer.innerHTML = "";
 
-    historyList.innerHTML = "";
-    finishedItems.slice().reverse().forEach(item => {
-      const itemEl = document.createElement("div");
-      itemEl.className = "history-item";
-
+    filtered.slice().reverse().forEach(item => {
       const isAudio = item.format_type === "audio";
-      const iconSvg = isAudio
-        ? `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>`
-        : `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>`;
+      const card = document.createElement("div");
+      card.className = "queue-card";
+      const displayTitle = cleanTitle(item.title || item.filename);
+      const sizeStr = item.downloaded_str || (isAudio ? "MP3" : "MP4");
 
-      itemEl.innerHTML = `
-        <div class="history-info">
-          <div class="history-icon ${isAudio ? 'audio' : ''}">
-            ${iconSvg}
+      card.innerHTML = `
+        <div class="card-main-row">
+          <div class="card-badge">${isAudio ? 'MP3' : 'MP4'}</div>
+          <div class="card-info">
+            <div class="card-title" title="${item.filename || item.title}">${displayTitle}</div>
+            <div class="card-meta">
+              <span>${sizeStr}</span> • <span class="status-ok">Completado</span>
+            </div>
           </div>
-          <div class="history-text">
-            <div class="history-name" title="${item.filename || item.title}">${item.filename || item.title}</div>
-            <div class="history-sub">${isAudio ? 'Audio MP3' : 'Video MP4'} • Guardado</div>
+          <div class="card-controls">
+            <button class="btn-icon-ctl btn-open-media" title="Reproducir archivo">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+            </button>
+            <button class="btn-icon-ctl btn-open-dir" title="Abrir en carpeta">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+              </svg>
+            </button>
           </div>
-        </div>
-        <div class="history-actions">
-          <button class="btn-icon-action btn-open-file" title="Mostrar en carpeta">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-            </svg>
-          </button>
         </div>
       `;
 
-      itemEl.querySelector(".btn-open-file").addEventListener("click", () => {
-        openInFolder(item.output_path);
+      card.querySelector(".btn-open-media").addEventListener("click", () => {
+        openPath(item.output_path);
       });
 
-      historyList.appendChild(itemEl);
+      card.querySelector(".btn-open-dir").addEventListener("click", () => {
+        openPath(item.output_path);
+      });
+
+      historyItemsContainer.appendChild(card);
     });
   }
 
-  // 9. Abrir carpeta en explorador de archivos
-  async function openInFolder(filePath) {
+  // 9. Filtrado en Sidebar
+  treeItems.forEach(item => {
+    item.addEventListener("click", () => {
+      treeItems.forEach(i => i.classList.remove("active"));
+      item.classList.add("active");
+      currentFilter = item.dataset.filter || "all";
+      renderQueueList();
+    });
+  });
+
+  // 10. Abrir en Explorador de Windows
+  async function openPath(pathStr) {
     try {
       await fetch("/api/open-folder", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: filePath || "" })
+        body: JSON.stringify({ path: pathStr || "" })
       });
-      showToast("Abriendo Explorador de Windows...", "info");
+      showToast("Abriendo en Explorador...", "info");
     } catch (e) {
-      showToast("No se pudo abrir la carpeta", "error");
+      showToast("No se pudo abrir la ruta", "error");
     }
   }
 
-  btnOpenDownloads.addEventListener("click", () => openInFolder(""));
+  btnOpenDownloads.addEventListener("click", () => openPath(""));
 
-  // 10. Sistema de Notificaciones Toast
+  // 11. Toasts
   function showToast(message, type = "info") {
     const toast = document.createElement("div");
-    toast.className = `toast ${type}`;
-    
-    let iconSvg = "";
-    if (type === "success") {
-      iconSvg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
-    } else if (type === "error") {
-      iconSvg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f43f5e" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>`;
-    } else {
-      iconSvg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`;
-    }
-
-    toast.innerHTML = `${iconSvg}<span>${message}</span>`;
+    toast.className = `toast-item ${type}`;
+    toast.textContent = message;
     toastContainer.appendChild(toast);
 
     setTimeout(() => {
       toast.style.opacity = "0";
-      toast.style.transform = "translateX(40px)";
-      toast.style.transition = "all 0.3s ease";
-      setTimeout(() => toast.remove(), 300);
-    }, 4000);
+      toast.style.transform = "translateY(10px)";
+      toast.style.transition = "all 0.2s ease";
+      setTimeout(() => toast.remove(), 200);
+    }, 3500);
   }
 
-  // Inicializar
+  // Inicio
   checkServerStatus();
   loadHistory();
 });

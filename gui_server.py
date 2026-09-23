@@ -252,13 +252,17 @@ def run_download_thread(dl_id, url, format_type, quality, output_dir):
             ydl_opts['ffmpeg_location'] = FFMPEG_EXE
 
         if format_type == 'audio':
-            # Descargar y extraer solo audio en MP3 de alta calidad
+            # Descargar y extraer audio a MP3 de forma ultra rápida con multi-hilo
+            bitrate = quality if quality in ('192', '256', '320') else ('320' if quality == 'best' else '192')
             ydl_opts.update({
-                'format': 'bestaudio/best',
+                'format': 'bestaudio[ext=m4a]/bestaudio/best',
+                'postprocessor_args': {
+                    'FFmpegExtractAudio': ['-threads', '0'],
+                },
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'mp3',
-                    'preferredquality': '320' if quality == 'best' else '192',
+                    'preferredquality': bitrate,
                 }, {
                     'key': 'FFmpegMetadata',
                     'add_metadata': True,
@@ -270,6 +274,9 @@ def run_download_thread(dl_id, url, format_type, quality, output_dir):
                 fmt = 'best'
                 ydl_opts.update({
                     'format': fmt,
+                    'postprocessor_args': {
+                        'FFmpegVideoConvertor': ['-threads', '0'],
+                    },
                     'postprocessors': [{
                         'key': 'FFmpegVideoConvertor',
                         'preferedformat': 'mp4',
@@ -294,6 +301,9 @@ def run_download_thread(dl_id, url, format_type, quality, output_dir):
                 ydl_opts.update({
                     'format': fmt,
                     'merge_output_format': 'mp4',
+                    'postprocessor_args': {
+                        'Merger': ['-threads', '0'],
+                    }
                 })
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
