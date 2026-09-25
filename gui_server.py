@@ -379,18 +379,24 @@ def run_download_thread(dl_id, url, format_type, quality, output_dir):
                     }]
                 })
             else:
+                # Video: Seleccionar siempre video + audio (compatible con YouTube DASH y con streams combinados de Instagram, TikTok, Facebook, Twitter)
+                # 'bv*' y 'ba*' coinciden con streams separados y combinados, y 'b[vcodec!=none]' prohíbe streams de solo audio.
                 if quality in ('2160', '1440', '1080', '720', '480'):
                     fmt = (
-                        f'bestvideo[vcodec^=avc1][height<={quality}]+bestaudio[acodec^=mp4a]/'
-                        f'bestvideo[ext=mp4][height<={quality}]+bestaudio[ext=m4a]/'
-                        f'bestvideo[height<={quality}]+bestaudio/'
-                        f'best[height<={quality}]/best'
+                        f'bv*[vcodec^=avc1][height<={quality}]+ba*[acodec^=mp4a]/'
+                        f'bv*[ext=mp4][height<={quality}]+ba*[ext=m4a]/'
+                        f'bv*[height<={quality}]+ba*/'
+                        f'b[height<={quality}][vcodec!=none]/'
+                        f'bv*[vcodec^=avc1]+ba*[acodec^=mp4a]/'
+                        f'bv*+ba*/'
+                        f'b[vcodec!=none]'
                     )
                 else:
                     fmt = (
-                        'bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/'
-                        'bestvideo[ext=mp4]+bestaudio[ext=m4a]/'
-                        'bestvideo+bestaudio/best'
+                        'bv*[vcodec^=avc1]+ba*[acodec^=mp4a]/'
+                        'bv*[ext=mp4]+ba*[ext=m4a]/'
+                        'bv*+ba*/'
+                        'b[vcodec!=none]'
                     )
 
                 ydl_opts.update({
@@ -523,6 +529,8 @@ class WebUIHandler(SimpleHTTPRequestHandler):
                 h = f.get("height")
                 if h and isinstance(h, int) and h >= 240:
                     resolutions.add(h)
+            if info.get("height") and isinstance(info.get("height"), int) and info.get("height") >= 240:
+                resolutions.add(info.get("height"))
             sorted_resolutions = sorted(list(resolutions), reverse=True)
 
             data = {
