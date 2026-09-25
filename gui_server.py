@@ -381,16 +381,24 @@ def run_download_thread(dl_id, url, format_type, quality, output_dir):
             else:
                 if quality in ('2160', '1440', '1080', '720', '480'):
                     fmt = (
-                        f'bestvideo*[height<={quality}]+bestaudio/best[height<={quality}]/best'
+                        f'bestvideo[vcodec^=avc1][height<={quality}]+bestaudio[acodec^=mp4a]/'
+                        f'bestvideo[ext=mp4][height<={quality}]+bestaudio[ext=m4a]/'
+                        f'bestvideo[height<={quality}]+bestaudio/'
+                        f'best[height<={quality}]/best'
                     )
                 else:
-                    fmt = 'bestvideo*+bestaudio/best'
+                    fmt = (
+                        'bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/'
+                        'bestvideo[ext=mp4]+bestaudio[ext=m4a]/'
+                        'bestvideo+bestaudio/best'
+                    )
 
                 ydl_opts.update({
                     'format': fmt,
+                    'format_sort': ['vcodec:h264', 'acodec:m4a', 'res', 'ext:mp4:m4a'],
                     'merge_output_format': 'mp4',
                     'postprocessor_args': {
-                        'Merger': ['-threads', '0'],
+                        'Merger': ['-threads', '0', '-c:a', 'aac'],
                     }
                 })
 
