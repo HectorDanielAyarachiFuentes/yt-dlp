@@ -7,12 +7,61 @@ import sys
 import os
 import json
 import urllib.parse
+import urllib.request
 import threading
 import time
 import webbrowser
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 import shutil
+from typing import Dict, List, Optional, Any, Union, TypedDict
+
+# Schemas y Contratos de Datos para API Cross-Language (Python <-> JS)
+class VideoInfoPayload(TypedDict, total=False):
+    id: Optional[str]
+    title: str
+    uploader: str
+    duration: int
+    duration_string: str
+    thumbnail: str
+    view_count: int
+    description: str
+    available_resolutions: List[int]
+    is_playlist: bool
+    is_bbb: bool
+    webcams_url: Optional[str]
+    deskshare_url: Optional[str]
+    stream_url: Optional[str]
+
+class DownloadProgressPayload(TypedDict, total=False):
+    id: str
+    url: str
+    status: str  # starting | downloading | processing | finished | error | idle
+    percent: float
+    speed: str
+    eta: str
+    downloaded_str: str
+    total_str: str
+    downloaded_bytes: int
+    total_bytes: int
+    filename: str
+    title: str
+    thumbnail: str
+    format_type: str
+    quality: str
+    output_path: str
+    error_message: str
+    started_at: float
+    completed_at: Optional[float]
+
+class ApiStatusPayload(TypedDict):
+    status: str
+    version: str
+    ffmpeg_available: bool
+    ffmpeg_path: str
+    download_dir: str
+    cookies_loaded: bool
+    cookie_file: Optional[str]
 
 # Agregar directorio actual al sys.path para importar yt_dlp directamente
 ROOT_DIR = Path(__file__).resolve().parent

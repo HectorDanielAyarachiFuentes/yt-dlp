@@ -328,18 +328,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 400);
   }
 
-  // 8. Cargar y renderizar historial
-  async function loadHistory() {
-    try {
-      const res = await fetch("/api/history");
-      if (!res.ok) return;
-      const data = await res.json();
-      historyItems = data.history || [];
-      renderQueueList();
-    } catch (e) {
-      console.warn("History fetch error:", e);
-    }
-  }
+  // 8. Utilidades de reproducción y previsualización
 
   function cleanTitle(raw) {
     if (!raw) return "Sin título";
